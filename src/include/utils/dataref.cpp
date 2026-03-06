@@ -392,9 +392,18 @@ T Dataref::get(const char *ref) {
     }
     else if constexpr (std::is_same<T, std::string>::value) {
         int size = XPLMGetDatab(handle, nullptr, 0, 0);
-        char str[size];
-        XPLMGetDatab(handle, &str, 0, size);
-        return std::string(str);
+        if (size <= 0) {
+            return "";
+        }
+
+        std::string outValue(static_cast<size_t>(size), '\0');
+        int bytesRead = XPLMGetDatab(handle, outValue.data(), 0, size);
+        if (bytesRead <= 0) {
+            return "";
+        }
+
+        outValue.resize(static_cast<size_t>(bytesRead));
+        return outValue;
     }
     
     if constexpr (std::is_same<T, std::string>::value) {
