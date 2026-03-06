@@ -1,0 +1,482 @@
+name: Build
+
+on:
+  push:
+    branches: ["*"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CEF_VERSION: "cef_binary_117.2.5%2Bgda4c36a%2Bchromium-117.0.5938.152"
+  XPLANE_SDK_URL: "https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK420.zip"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # macOS – arm64 (Apple Silicon), signed & notarized
+  # ---------------------------------------------------------------------------
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Dependencies ----
+      - name: Cache CEF (macOS arm64)
+        id: cache-cef-mac
+        uses: actions/cache@v4
+        with:
+          path: lib/mac_x64/cef
+          key: cef-macosarm64-117.2.5
+
+      - name: Download CEF (macOS arm64)
+        if: steps.cache-cef-mac.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL -o cef_mac.tar.bz2 \
+            "https://cef-builds.spotifycdn.com/${CEF_VERSION}_macosarm64.tar.bz2"
+          mkdir -p cef_mac_extract
+          tar xjf cef_mac.tar.bz2 -C cef_mac_extract --strip-components=1
+          mkdir -p lib/mac_x64/cef
+          cp -R cef_mac_extract/include lib/mac_x64/cef/
+          cp -R cef_mac_extract/Release lib/mac_x64/cef/
+          cp -R cef_mac_extract/libcef_dll lib/mac_x64/cef/
+          cp -R cef_mac_extract/cmake lib/mac_x64/cef/
+          cp cef_mac_extract/CMakeLists.txt lib/mac_x64/cef/
+          cp cef_mac_extract/LICENSE.txt lib/mac_x64/cef/
+          cp cef_mac_extract/README.txt lib/mac_x64/cef/
+
+      - name: Build CEF wrapper (macOS)
+        if: steps.cache-cef-mac.outputs.cache-hit != 'true'
+        run: |
+          cd lib/mac_x64/cef
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                -DPROJECT_ARCH=arm64 \
+                -DUSE_SANDBOX=OFF \
+                -Bbuild -H.
+          cmake --build build --target libcef_dll_wrapper --config Release --parallel $(sysctl -n hw.ncpu)
+          cp build/libcef_dll_wrapper/libcef_dll_wrapper.a .
+
+      - name: Cache X-Plane SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: SDK
+          key: xplane-sdk-420
+
+      - name: Download X-Plane SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL -o sdk.zip "$XPLANE_SDK_URL"
+          unzip -q sdk.zip -d SDK_tmp
+          mv SDK_tmp/SDK .
+          rm -rf SDK_tmp sdk.zip
+
+      # ---- Build ----
+      - name: Build SkyScript (macOS arm64)
+        run: |
+          cmake \
+            -DCMAKE_TOOLCHAIN_FILE=toolchain-mac.cmake \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DXPLANE_VERSION=12 \
+            -DXPLANE_SDK_ROOT="${{ github.workspace }}/SDK" \
+            -Bbuild/mac -H.
+          cmake --build build/mac --parallel $(sysctl -n hw.ncpu)
+
+      # ---- Code signing & notarization ----
+      - name: Import Apple code signing cert
+        if: github.event_name != 'pull_request'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.P12_PASSWORD }}
+
+      - name: Sign SkyScript.xpl (macOS)
+        if: github.event_name != 'pull_request'
+        run: |
+          codesign --timestamp \
+            --options runtime \
+            --sign "${{ secrets.CODESIGN_IDENTITY }}" \
+            build/mac/mac_x64/SkyScript.xpl
+
+      - name: Notarize SkyScript.xpl (macOS)
+        if: github.event_name != 'pull_request'
+        run: |
+          ditto -c -k --keepParent \
+            build/mac/mac_x64/SkyScript.xpl \
+            build/mac/SkyScript-mac.zip
+
+          xcrun notarytool submit build/mac/SkyScript-mac.zip \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --password "${{ secrets.MAC_DEV_PASSWORD }}" \
+            --team-id "${{ secrets.APPLE_TEAMID }}" \
+            --wait
+
+      # ---- Upload artifact ----
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac_x64
+          path: build/mac/mac_x64/SkyScript.xpl
+
+  # ---------------------------------------------------------------------------
+  # Linux – x86_64, built in container matching the Docker setup
+  # ---------------------------------------------------------------------------
+  build-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential cmake pkg-config zip unzip git curl \
+            libgl-dev libssl-dev libcurl4-openssl-dev libudev-dev \
+            python3 ca-certificates libnss3 libatk-bridge2.0-0
+
+      - uses: actions/checkout@v4
+
+      # ---- Dependencies ----
+      - name: Cache CEF (Linux x64)
+        id: cache-cef-lin
+        uses: actions/cache@v4
+        with:
+          path: lib/lin_x64/cef
+          key: cef-linux64-117.2.5
+
+      - name: Download CEF (Linux x64)
+        if: steps.cache-cef-lin.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL -o cef_lin.tar.bz2 \
+            "https://cef-builds.spotifycdn.com/${CEF_VERSION}_linux64.tar.bz2"
+          mkdir -p cef_lin_extract
+          tar xjf cef_lin.tar.bz2 -C cef_lin_extract --strip-components=1
+          mkdir -p lib/lin_x64/cef
+          cp -R cef_lin_extract/include lib/lin_x64/cef/
+          cp -R cef_lin_extract/Release lib/lin_x64/cef/
+          cp -R cef_lin_extract/libcef_dll lib/lin_x64/cef/
+          cp -R cef_lin_extract/cmake lib/lin_x64/cef/
+          cp cef_lin_extract/CMakeLists.txt lib/lin_x64/cef/
+          cp cef_lin_extract/LICENSE.txt lib/lin_x64/cef/
+          cp cef_lin_extract/README.txt lib/lin_x64/cef/
+
+      - name: Build CEF wrapper (Linux)
+        if: steps.cache-cef-lin.outputs.cache-hit != 'true'
+        run: |
+          cd lib/lin_x64/cef
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DPROJECT_ARCH=x86_64 \
+                -DUSE_SANDBOX=OFF \
+                -Bbuild -H.
+          cmake --build build --target libcef_dll_wrapper --config Release --parallel $(nproc)
+          mkdir -p libcef_dll_wrapper
+          cp build/libcef_dll_wrapper/libcef_dll_wrapper.a libcef_dll_wrapper/
+
+      - name: Cache X-Plane SDK
+        id: cache-sdk-lin
+        uses: actions/cache@v4
+        with:
+          path: SDK
+          key: xplane-sdk-420
+
+      - name: Download X-Plane SDK
+        if: steps.cache-sdk-lin.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL -o sdk.zip "$XPLANE_SDK_URL"
+          unzip -q sdk.zip -d SDK_tmp
+          mv SDK_tmp/SDK .
+          rm -rf SDK_tmp sdk.zip
+
+      # ---- Build ----
+      - name: Build SkyScript (Linux x64)
+        run: |
+          cmake \
+            -DCMAKE_CXX_FLAGS='-march=x86-64' \
+            -DCMAKE_TOOLCHAIN_FILE=toolchain-lin.cmake \
+            -DXPLANE_VERSION=12 \
+            -DXPLANE_SDK_ROOT="${{ github.workspace }}/SDK" \
+            -Bbuild/lin -H.
+          cmake --build build/lin --parallel $(nproc)
+
+      # ---- Upload artifact ----
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lin_x64
+          path: build/lin/lin_x64/SkyScript.xpl
+
+  # ---------------------------------------------------------------------------
+  # Windows – x86_64, native MSYS2/MinGW
+  # ---------------------------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-openssl
+            make
+            tar
+            unzip
+            git
+
+      - uses: actions/checkout@v4
+
+      # ---- Dependencies ----
+      - name: Cache CEF (Windows x64)
+        id: cache-cef-win
+        uses: actions/cache@v4
+        with:
+          path: lib/win_x64/cef
+          key: cef-windows64-117.2.5
+
+      - name: Download CEF (Windows x64)
+        if: steps.cache-cef-win.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://cef-builds.spotifycdn.com/cef_binary_117.2.5%2Bgda4c36a%2Bchromium-117.0.5938.152_windows64.tar.bz2"
+          Invoke-WebRequest -Uri $url -OutFile cef_win.tar.bz2
+          mkdir cef_win_extract
+          tar xjf cef_win.tar.bz2 -C cef_win_extract --strip-components=1
+          New-Item -ItemType Directory -Force -Path lib/win_x64/cef
+          Copy-Item -Recurse cef_win_extract/include lib/win_x64/cef/
+          Copy-Item -Recurse cef_win_extract/Release lib/win_x64/cef/
+          Copy-Item -Recurse cef_win_extract/libcef_dll lib/win_x64/cef/
+          Copy-Item -Recurse cef_win_extract/cmake lib/win_x64/cef/
+          Copy-Item cef_win_extract/CMakeLists.txt lib/win_x64/cef/
+          Copy-Item cef_win_extract/LICENSE.txt lib/win_x64/cef/
+          Copy-Item cef_win_extract/README.txt lib/win_x64/cef/
+
+      - name: Build CEF wrapper (Windows/MinGW)
+        if: steps.cache-cef-win.outputs.cache-hit != 'true'
+        run: |
+          # CEF's own cmake assumes MSVC on Windows. We use a standalone
+          # CMakeLists.txt with MinGW-compatible flags instead.
+          cat > lib/win_x64/cef/CMakeLists_mingw.txt << 'EOF'
+          cmake_minimum_required(VERSION 3.19)
+          project(cef_wrapper C CXX)
+          set(CMAKE_CXX_STANDARD 17)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+          set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+          file(GLOB_RECURSE WRAPPER_SRCS "${CEF_ROOT}/libcef_dll/*.cc")
+          # Exclude Mac-only files
+          list(FILTER WRAPPER_SRCS EXCLUDE REGEX ".*_mac\\.mm$")
+
+          add_library(libcef_dll_wrapper STATIC ${WRAPPER_SRCS})
+          target_include_directories(libcef_dll_wrapper PUBLIC "${CEF_ROOT}")
+          target_compile_definitions(libcef_dll_wrapper PRIVATE
+            WRAPPING_CEF_SHARED
+            WIN32 _WIN32 _WINDOWS
+            UNICODE _UNICODE
+            NDEBUG
+            __STDC_CONSTANT_MACROS __STDC_FORMAT_MACROS
+          )
+          target_compile_options(libcef_dll_wrapper PRIVATE -fno-exceptions -fno-rtti)
+          set_target_properties(libcef_dll_wrapper PROPERTIES PREFIX "")
+          EOF
+
+          cd lib/win_x64/cef
+          # Swap in the MinGW-compatible CMakeLists
+          mv CMakeLists.txt CMakeLists.txt.orig
+          mv CMakeLists_mingw.txt CMakeLists.txt
+          cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -Bbuild_mingw -H.
+          cmake --build build_mingw --parallel $(nproc)
+          # Restore original and place the built library
+          mv CMakeLists.txt.orig CMakeLists.txt
+          mkdir -p libcef_dll_wrapper
+          cp build_mingw/libcef_dll_wrapper.a libcef_dll_wrapper/
+
+      - name: Cache X-Plane SDK
+        id: cache-sdk-win
+        uses: actions/cache@v4
+        with:
+          path: SDK
+          key: xplane-sdk-420
+
+      - name: Download X-Plane SDK
+        if: steps.cache-sdk-win.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "$env:XPLANE_SDK_URL" -OutFile sdk.zip
+          Expand-Archive -Path sdk.zip -DestinationPath SDK_tmp
+          Move-Item SDK_tmp/SDK .
+          Remove-Item -Recurse SDK_tmp, sdk.zip
+
+      # ---- Build ----
+      - name: Prepare curl dev files (Windows)
+        run: |
+          # Create the lib layout expected by CMakeLists.txt
+          # using MSYS2's mingw-w64-x86_64-curl already installed
+          mkdir -p lib/win_x64/curl/lib lib/win_x64/curl/include
+          cp -r /mingw64/include/curl lib/win_x64/curl/include/
+          cp /mingw64/lib/libcurl.dll.a lib/win_x64/curl/lib/libcurl.a
+
+      - name: Build SkyScript (Windows x64)
+        run: |
+          cmake -G "MinGW Makefiles" \
+            -DCMAKE_TOOLCHAIN_FILE=toolchain-win-native.cmake \
+            -DXPLANE_VERSION=12 \
+            -DXPLANE_SDK_ROOT="${{ github.workspace }}/SDK" \
+            -Bbuild/win -H.
+          cmake --build build/win --parallel $(nproc)
+
+      # ---- Upload artifact ----
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: win_x64
+          path: build/win/win_x64/SkyScript.xpl
+
+  # ---------------------------------------------------------------------------
+  # Package + Release (runs after all builds complete)
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [build-mac, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Read version from config.h
+        id: version
+        run: |
+          VERSION=$(grep '#define VERSION ' src/include/config.h | cut -d '"' -f 2)
+          TAG=${GITHUB_REF##*/}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create distribution bundle
+        run: |
+          PRODUCT_NAME="SkyScript"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          mkdir -p dist/${PRODUCT_NAME}/mac_x64
+          mkdir -p dist/${PRODUCT_NAME}/lin_x64
+          mkdir -p dist/${PRODUCT_NAME}/win_x64
+
+          cp artifacts/mac_x64/SkyScript.xpl dist/${PRODUCT_NAME}/mac_x64/
+          cp artifacts/lin_x64/SkyScript.xpl dist/${PRODUCT_NAME}/lin_x64/
+          cp artifacts/win_x64/SkyScript.xpl dist/${PRODUCT_NAME}/win_x64/
+
+          cp -r assets dist/${PRODUCT_NAME}/
+
+          # Generate skunkcrafts updater config
+          printf 'module|https://github.com/x-z7a/skyscript-cef\nname|SkyScript\nversion|%s\nlocked|false\ndisabled|false\nzone|custom\n' "$VERSION" \
+            > dist/${PRODUCT_NAME}/skunkcrafts_updater.cfg
+
+          cd dist
+          zip -rq "${PRODUCT_NAME}-${VERSION}-XP12.zip" "${PRODUCT_NAME}" \
+            -x "*/.DS_Store" -x "*/__MACOSX/*"
+
+      - name: Generate release notes
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+          TAG=${{ steps.version.outputs.tag }}
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          {
+            echo 'notes<<RELEASE_NOTES_EOF'
+
+            echo "## What's Changed"
+            echo ""
+
+            # Features
+            FEATS=$(git log "$RANGE" --pretty=format:"%s" --no-merges | grep -iE '^feat(\(.*\))?!?:' || true)
+            if [ -n "$FEATS" ]; then
+              echo "### Features"
+              echo "$FEATS" | sed 's/^feat\(([^)]*)\)\?!*: //' | while IFS= read -r line; do
+                echo "- $line"
+              done
+              echo ""
+            fi
+
+            # Bug Fixes
+            FIXES=$(git log "$RANGE" --pretty=format:"%s" --no-merges | grep -iE '^fix(\(.*\))?!?:' || true)
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES" | sed 's/^fix\(([^)]*)\)\?!*: //' | while IFS= read -r line; do
+                echo "- $line"
+              done
+              echo ""
+            fi
+
+            # Performance
+            PERFS=$(git log "$RANGE" --pretty=format:"%s" --no-merges | grep -iE '^perf(\(.*\))?!?:' || true)
+            if [ -n "$PERFS" ]; then
+              echo "### Performance"
+              echo "$PERFS" | sed 's/^perf\(([^)]*)\)\?!*: //' | while IFS= read -r line; do
+                echo "- $line"
+              done
+              echo ""
+            fi
+
+            # Refactoring
+            REFACTORS=$(git log "$RANGE" --pretty=format:"%s" --no-merges | grep -iE '^refactor(\(.*\))?!?:' || true)
+            if [ -n "$REFACTORS" ]; then
+              echo "### Refactoring"
+              echo "$REFACTORS" | sed 's/^refactor\(([^)]*)\)\?!*: //' | while IFS= read -r line; do
+                echo "- $line"
+              done
+              echo ""
+            fi
+
+            # Other changes (chore, docs, style, test, build, ci, etc.)
+            OTHERS=$(git log "$RANGE" --pretty=format:"%s" --no-merges | grep -ivE '^(feat|fix|perf|refactor)(\(.*\))?!?:' || true)
+            if [ -n "$OTHERS" ]; then
+              echo "### Other Changes"
+              echo "$OTHERS" | while IFS= read -r line; do
+                echo "- $line"
+              done
+              echo ""
+            fi
+
+            # Breaking changes (indicated by ! before the colon)
+            BREAKING=$(git log "$RANGE" --pretty=format:"%s" --no-merges | grep -E '^[a-z]+(\(.*\))?!:' || true)
+            if [ -n "$BREAKING" ]; then
+              echo "### Breaking Changes"
+              echo "$BREAKING" | while IFS= read -r line; do
+                echo "- $line"
+              done
+              echo ""
+            fi
+
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD | head -1)}...$TAG"
+
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: ${{ steps.changelog.outputs.notes }}
+          files: |
+            dist/SkyScript-${{ steps.version.outputs.version }}-XP12.zip
+          prerelease: ${{ contains(github.ref_name, '-') }}
