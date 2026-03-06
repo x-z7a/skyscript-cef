@@ -195,7 +195,7 @@ jobs:
             -DCMAKE_CXX_FLAGS='-march=x86-64' \
             -DCMAKE_TOOLCHAIN_FILE=toolchain-lin.cmake \
             -DXPLANE_VERSION=12 \
-            -DXPLANE_SDK_ROOT="${{ github.workspace }}/SDK" \
+            -DXPLANE_SDK_ROOT="$(pwd)/SDK" \
             -Bbuild/lin -H.
           cmake --build build/lin --parallel $(nproc)
 
@@ -259,19 +259,18 @@ jobs:
       - name: Build CEF wrapper (Windows/MinGW)
         if: steps.cache-cef-win.outputs.cache-hit != 'true'
         run: |
-          # CEF's own cmake assumes MSVC on Windows. We use a standalone
-          # CMakeLists.txt with MinGW-compatible flags instead.
-          cat > lib/win_x64/cef/CMakeLists_mingw.txt << 'EOF'
+          # CEF's own cmake assumes MSVC on Windows (uses /MP, /MT flags).
+          # Replace it with a minimal CMakeLists that works with GCC/MinGW.
+          cd lib/win_x64/cef
+          mv CMakeLists.txt CMakeLists.txt.orig
+          cat > CMakeLists.txt << 'WRAPPEREOF'
           cmake_minimum_required(VERSION 3.19)
           project(cef_wrapper C CXX)
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
           set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
           file(GLOB_RECURSE WRAPPER_SRCS "${CEF_ROOT}/libcef_dll/*.cc")
-          # Exclude Mac-only files
           list(FILTER WRAPPER_SRCS EXCLUDE REGEX ".*_mac\\.mm$")
-
           add_library(libcef_dll_wrapper STATIC ${WRAPPER_SRCS})
           target_include_directories(libcef_dll_wrapper PUBLIC "${CEF_ROOT}")
           target_compile_definitions(libcef_dll_wrapper PRIVATE
@@ -283,15 +282,12 @@ jobs:
           )
           target_compile_options(libcef_dll_wrapper PRIVATE -fno-exceptions -fno-rtti)
           set_target_properties(libcef_dll_wrapper PROPERTIES PREFIX "")
-          EOF
+          WRAPPEREOF
 
-          cd lib/win_x64/cef
-          # Swap in the MinGW-compatible CMakeLists
-          mv CMakeLists.txt CMakeLists.txt.orig
-          mv CMakeLists_mingw.txt CMakeLists.txt
-          cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -Bbuild_mingw -H.
+          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -Bbuild_mingw -H.
           cmake --build build_mingw --parallel $(nproc)
-          # Restore original and place the built library
+
+          # Restore original CMakeLists and place the built library
           mv CMakeLists.txt.orig CMakeLists.txt
           mkdir -p libcef_dll_wrapper
           cp build_mingw/libcef_dll_wrapper.a libcef_dll_wrapper/
@@ -323,8 +319,8 @@ jobs:
 
       - name: Build SkyScript (Windows x64)
         run: |
-          cmake -G "MinGW Makefiles" \
-            -DCMAKE_TOOLCHAIN_FILE=toolchain-win-native.cmake \
+          cmake -G "Unix Makefiles" \
+            -DCMAKE_SYSTEM_NAME=Windows \
             -DXPLANE_VERSION=12 \
             -DXPLANE_SDK_ROOT="${{ github.workspace }}/SDK" \
             -Bbuild/win -H.
