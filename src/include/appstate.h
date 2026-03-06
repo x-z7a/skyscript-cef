@@ -58,8 +58,8 @@ private:
 public:
     static constexpr unsigned short defaultWindowWidth = 1024;
     static constexpr unsigned short defaultWindowHeight = 768;
-    static constexpr float browserTopRatio = 0.935f;
-    static constexpr float toolbarY = 0.967f;
+    static constexpr float browserTopRatio = 1.0f;
+    static constexpr float toolbarY = 0.985f;
 
     XPLMWindowID mainWindow;
     float brightness;
