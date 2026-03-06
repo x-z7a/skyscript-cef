@@ -207,29 +207,20 @@ jobs:
           path: build/lin/lin_x64/SkyScript.xpl
 
   # ---------------------------------------------------------------------------
-  # Windows – x86_64, native MSYS2/MinGW
+  # Windows – x86_64, native MSVC
   # ---------------------------------------------------------------------------
   build-windows:
     runs-on: windows-latest
     defaults:
       run:
-        shell: msys2 {0}
+        shell: pwsh
     steps:
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-curl
-            mingw-w64-x86_64-openssl
-            make
-            tar
-            unzip
-            git
-
       - uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       # ---- Dependencies ----
       - name: Cache CEF (Windows x64)
@@ -237,7 +228,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: lib/win_x64/cef
-          key: cef-windows64-117.2.5
+          key: cef-windows64-117.2.5-msvc
 
       - name: Download CEF (Windows x64)
         if: steps.cache-cef-win.outputs.cache-hit != 'true'
@@ -256,41 +247,22 @@ jobs:
           Copy-Item cef_win_extract/LICENSE.txt lib/win_x64/cef/
           Copy-Item cef_win_extract/README.txt lib/win_x64/cef/
 
-      - name: Build CEF wrapper (Windows/MinGW)
-        if: steps.cache-cef-win.outputs.cache-hit != 'true'
+      - name: Build CEF wrapper (Windows/MSVC)
         run: |
-          # CEF's own cmake assumes MSVC on Windows (uses /MP, /MT flags).
-          # Replace it with a minimal CMakeLists that works with GCC/MinGW.
-          cd lib/win_x64/cef
-          mv CMakeLists.txt CMakeLists.txt.orig
-          cat > CMakeLists.txt << 'WRAPPEREOF'
-          cmake_minimum_required(VERSION 3.19)
-          project(cef_wrapper C CXX)
-          set(CMAKE_CXX_STANDARD 17)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
-          set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-          file(GLOB_RECURSE WRAPPER_SRCS "${CEF_ROOT}/libcef_dll/*.cc")
-          list(FILTER WRAPPER_SRCS EXCLUDE REGEX ".*_mac\\.mm$")
-          add_library(libcef_dll_wrapper STATIC ${WRAPPER_SRCS})
-          target_include_directories(libcef_dll_wrapper PUBLIC "${CEF_ROOT}")
-          target_compile_definitions(libcef_dll_wrapper PRIVATE
-            WRAPPING_CEF_SHARED
-            WIN32 _WIN32 _WINDOWS
-            UNICODE _UNICODE
-            NDEBUG
-            __STDC_CONSTANT_MACROS __STDC_FORMAT_MACROS
-          )
-          target_compile_options(libcef_dll_wrapper PRIVATE -fno-exceptions -fno-rtti)
-          set_target_properties(libcef_dll_wrapper PROPERTIES PREFIX "")
-          WRAPPEREOF
+          if (Test-Path "lib/win_x64/cef/libcef_dll_wrapper/libcef_dll_wrapper.lib") {
+            Write-Host "CEF wrapper already present in cache."
+            exit 0
+          }
 
-          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -Bbuild_mingw -H.
-          cmake --build build_mingw --parallel $(nproc)
+          cmake -S lib/win_x64/cef -B lib/win_x64/cef/build -G "Visual Studio 17 2022" -A x64 -DPROJECT_ARCH=x86_64 -DUSE_SANDBOX=OFF
+          cmake --build lib/win_x64/cef/build --config Release --target libcef_dll_wrapper --parallel
 
-          # Restore original CMakeLists and place the built library
-          mv CMakeLists.txt.orig CMakeLists.txt
-          mkdir -p libcef_dll_wrapper
-          cp build_mingw/libcef_dll_wrapper.a libcef_dll_wrapper/
+          New-Item -ItemType Directory -Force -Path lib/win_x64/cef/libcef_dll_wrapper | Out-Null
+          $wrapperLib = Get-ChildItem -Path lib/win_x64/cef/build -Recurse -Filter libcef_dll_wrapper.lib | Select-Object -First 1
+          if (-not $wrapperLib) {
+            throw "libcef_dll_wrapper.lib not found after the CEF wrapper build"
+          }
+          Copy-Item $wrapperLib.FullName lib/win_x64/cef/libcef_dll_wrapper/
 
       - name: Cache X-Plane SDK
         id: cache-sdk-win
@@ -309,29 +281,31 @@ jobs:
           Remove-Item -Recurse SDK_tmp, sdk.zip
 
       # ---- Build ----
-      - name: Prepare curl dev files (Windows)
+      - name: Install curl via vcpkg (Windows)
         run: |
-          # Create the lib layout expected by CMakeLists.txt
-          # using MSYS2's mingw-w64-x86_64-curl already installed
-          mkdir -p lib/win_x64/curl/lib lib/win_x64/curl/include
-          cp -r /mingw64/include/curl lib/win_x64/curl/include/
-          cp /mingw64/lib/libcurl.dll.a lib/win_x64/curl/lib/libcurl.a
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            throw "VCPKG_INSTALLATION_ROOT is not set on the runner"
+          }
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install curl:x64-windows-static
 
       - name: Build SkyScript (Windows x64)
         run: |
-          cmake -G "Unix Makefiles" \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DXPLANE_VERSION=12 \
-            -DXPLANE_SDK_ROOT="${{ github.workspace }}/SDK" \
-            -Bbuild/win -H.
-          cmake --build build/win --parallel $(nproc)
+          cmake -S . -B build/win -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DXPLANE_VERSION=12 -DXPLANE_SDK_ROOT="$env:GITHUB_WORKSPACE\SDK"
+          cmake --build build/win --config Release --parallel
+
+          New-Item -ItemType Directory -Force -Path build/windows-artifact | Out-Null
+          $plugin = Get-ChildItem -Path build/win -Recurse -Filter SkyScript.xpl | Select-Object -First 1
+          if (-not $plugin) {
+            throw "SkyScript.xpl not found after the Windows build"
+          }
+          Copy-Item $plugin.FullName build/windows-artifact/SkyScript.xpl
 
       # ---- Upload artifact ----
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: win_x64
-          path: build/win/win_x64/SkyScript.xpl
+          path: build/windows-artifact/SkyScript.xpl
 
   # ---------------------------------------------------------------------------
   # Package + Release (runs after all builds complete)
