@@ -329,7 +329,8 @@ float update(float inElapsedSinceLastCall, float inElapsedTimeSinceLastFlightLoo
     }
 #endif
 
-    if (AppState::getInstance()->browser->hasInputFocus() != XPLMHasKeyboardFocus(AppState::getInstance()->mainWindow)) {
+    bool hasKeyboardFocus = XPLMHasKeyboardFocus(AppState::getInstance()->mainWindow) != 0;
+    if (AppState::getInstance()->browser->hasInputFocus() != hasKeyboardFocus) {
         if (AppState::getInstance()->browser->hasInputFocus()) {
             AppState::getInstance()->browser->setFocus(true);
             XPLMBringWindowToFront(AppState::getInstance()->mainWindow);

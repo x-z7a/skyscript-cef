@@ -258,6 +258,9 @@ jobs:
 
           cmake -S lib/win_x64/cef -B lib/win_x64/cef/build -G "Visual Studio 17 2022" -A x64 -DPROJECT_ARCH=x86_64 -DUSE_SANDBOX=OFF
           cmake --build lib/win_x64/cef/build --config Release --target libcef_dll_wrapper --parallel
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
           New-Item -ItemType Directory -Force -Path lib/win_x64/cef/libcef_dll_wrapper | Out-Null
           $wrapperLib = Get-ChildItem -Path lib/win_x64/cef/build -Recurse -Filter libcef_dll_wrapper.lib | Select-Object -First 1
@@ -289,11 +292,20 @@ jobs:
             throw "VCPKG_INSTALLATION_ROOT is not set on the runner"
           }
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install curl:x64-windows-static
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Build SkyScript (Windows x64)
         run: |
           cmake -S . -B build/win -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DXPLANE_VERSION=12 -DXPLANE_SDK_ROOT="$env:GITHUB_WORKSPACE\SDK"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
           cmake --build build/win --config Release --parallel
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
           New-Item -ItemType Directory -Force -Path build/windows-artifact | Out-Null
           $plugin = Get-ChildItem -Path build/win -Recurse -Filter SkyScript.xpl | Select-Object -First 1

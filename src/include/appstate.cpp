@@ -25,7 +25,7 @@ unsigned short nextPowerOfTwo(unsigned int value) {
         result <<= 1;
     }
 
-    return static_cast<unsigned short>(std::min(result, static_cast<unsigned int>(std::numeric_limits<unsigned short>::max())));
+    return static_cast<unsigned short>((std::min)(result, static_cast<unsigned int>(std::numeric_limits<unsigned short>::max())));
 }
 }
 
@@ -221,8 +221,8 @@ bool AppState::syncWindowGeometry(bool resizeBrowser) {
     int left, top, right, bottom;
     XPLMGetWindowGeometry(mainWindow, &left, &top, &right, &bottom);
 
-    unsigned short width = static_cast<unsigned short>(std::max(1, right - left));
-    unsigned short height = static_cast<unsigned short>(std::max(1, top - bottom));
+    unsigned short width = static_cast<unsigned short>((std::max)(1, right - left));
+    unsigned short height = static_cast<unsigned short>((std::max)(1, top - bottom));
     bool changed = setViewport(left, bottom, width, height);
     if (changed && resizeBrowser && browser) {
         browser->resize();
@@ -437,11 +437,11 @@ bool AppState::fileExists(std::string filename) {
 }
 
 bool AppState::setViewport(int x, int y, unsigned short width, unsigned short height) {
-    unsigned short safeWidth = std::max<unsigned short>(1, width);
-    unsigned short safeHeight = std::max<unsigned short>(1, height);
+    unsigned short safeWidth = (std::max<unsigned short>)(1, width);
+    unsigned short safeHeight = (std::max<unsigned short>)(1, height);
     float multiplier = safeWidth < config.minimum_width ? static_cast<float>(config.minimum_width) / safeWidth : 1.0f;
     unsigned short browserWidth = static_cast<unsigned short>(std::ceil(safeWidth * multiplier));
-    unsigned short browserHeight = static_cast<unsigned short>(std::max(1.0f, std::ceil((safeHeight * browserTopRatio) * multiplier)));
+    unsigned short browserHeight = static_cast<unsigned short>((std::max)(1.0f, std::ceil((safeHeight * browserTopRatio) * multiplier)));
     unsigned short textureWidth = nextPowerOfTwo(browserWidth);
     unsigned short textureHeight = nextPowerOfTwo(browserHeight);
 

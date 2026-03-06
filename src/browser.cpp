@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -185,7 +186,7 @@ void Browser::update() {
         backButton->visible = AppState::getInstance()->browserVisible;
     }
 
-    if (lastGpsUpdateTime > __FLT_EPSILON__ && XPLMGetElapsedTime() > lastGpsUpdateTime + 1.0f) {
+    if (lastGpsUpdateTime > std::numeric_limits<float>::epsilon() && XPLMGetElapsedTime() > lastGpsUpdateTime + 1.0f) {
         updateGPSLocation();
     }
 }

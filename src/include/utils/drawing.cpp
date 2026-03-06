@@ -5,6 +5,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
+
+namespace {
+constexpr float kHalfPi = std::numbers::pi_v<float> / 2.0f;
+}
 
 float Drawing::AbsoluteX(float normalizedX) {
     return AppState::getInstance()->viewport.x + AppState::getInstance()->viewport.width * normalizedX;
@@ -44,7 +49,7 @@ void Drawing::DrawRoundedRect(float x1, float y1, float x2, float y2, float radi
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(AbsoluteX(x1) + radius, AbsoluteY(y2) - radius);
     for (int i = 0; i <= cornerSegments; ++i) {
-        float angle = (M_PI_2 * 2.0f) + i * (M_PI_2 / cornerSegments);
+        float angle = (kHalfPi * 2.0f) + i * (kHalfPi / cornerSegments);
         glVertex2f(AbsoluteX(x1) + radius + cos(angle) * radius, AbsoluteY(y2) - radius - sin(angle) * radius);
     }
     glEnd();
@@ -52,7 +57,7 @@ void Drawing::DrawRoundedRect(float x1, float y1, float x2, float y2, float radi
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(AbsoluteX(x2) - radius, AbsoluteY(y2) - radius);
     for (int i = 0; i <= cornerSegments; ++i) {
-        float angle = (M_PI_2 * 3.0f) + i * (M_PI_2 / cornerSegments);
+        float angle = (kHalfPi * 3.0f) + i * (kHalfPi / cornerSegments);
         glVertex2f(AbsoluteX(x2) - radius + cos(angle) * radius, AbsoluteY(y2) - radius - sin(angle) * radius);
     }
     glEnd();
@@ -60,7 +65,7 @@ void Drawing::DrawRoundedRect(float x1, float y1, float x2, float y2, float radi
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(AbsoluteX(x1) + radius, AbsoluteY(y1) + radius);
     for (int i = 0; i <= cornerSegments; ++i) {
-        float angle = (M_PI_2 * 1.0f) + i * (M_PI_2 / cornerSegments);
+        float angle = (kHalfPi * 1.0f) + i * (kHalfPi / cornerSegments);
         glVertex2f(AbsoluteX(x1) + radius + cos(angle) * radius, AbsoluteY(y1) + radius - sin(angle) * radius);
     }
     glEnd();
@@ -68,7 +73,7 @@ void Drawing::DrawRoundedRect(float x1, float y1, float x2, float y2, float radi
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(AbsoluteX(x2) - radius, AbsoluteY(y1) + radius);
     for (int i = 0; i <= cornerSegments; ++i) {
-        float angle = (M_PI_2 * 0.0f) + i * (M_PI_2 / cornerSegments);
+        float angle = (kHalfPi * 0.0f) + i * (kHalfPi / cornerSegments);
         glVertex2f(AbsoluteX(x2) - radius + cos(angle) * radius, AbsoluteY(y1) + radius - sin(angle) * radius);
     }
     glEnd();
