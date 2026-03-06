@@ -14,20 +14,17 @@
 #define debug(format, ...)                                                           \
     {                                                                                \
         char buffer[1024];                                                           \
-        snprintf(buffer, sizeof(buffer), "[avitab-browser] " format, ##__VA_ARGS__); \
+        snprintf(buffer, sizeof(buffer), "[SkyScript] " format, ##__VA_ARGS__); \
         XPLMDebugString(buffer);                                                     \
     }
 
-#define PRODUCT_NAME "avitab-browser"
-#define FRIENDLY_NAME "X-Plane Browser"
+#define PRODUCT_NAME "SkyScript"
+#define FRIENDLY_NAME "SkyScript"
 #define VERSION "1.0.6"
-#define VERSION_CHECK_URL "https://api.github.com/repos/rswilem/avitab-browser/releases?per_page=1&page=1"
+#define VERSION_CHECK_URL "https://api.github.com/repos/x-z7a/skyscript-cef/releases?per_page=1&page=1"
 #define ALL_PLUGINS_DIRECTORY "/Resources/plugins/"
 #define PLUGIN_DIRECTORY (ALL_PLUGINS_DIRECTORY PRODUCT_NAME)
-#define BUNDLE_ID "com.ramonster." PRODUCT_NAME
-
-// See https://forums.x-plane.org/index.php?/forums/topic/261574-tutorial-integrating-avitab/#findComment-2319386
-#define AVITAB_USE_FIXED_ASPECT_RATIO 1
+#define BUNDLE_ID "com.xz7a." PRODUCT_NAME
 
 #define SCALE_IMAGES 1
 

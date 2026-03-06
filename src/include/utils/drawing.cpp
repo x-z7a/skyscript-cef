@@ -166,7 +166,7 @@ float Drawing::DrawText(std::string text, float x, float y, float scale, std::ar
     glTranslatef(AbsoluteX(x - textWidth / 2.0f), AbsoluteY(y) - 3.0f, 0.0f);
     glScalef(scale, scale, 1.0f);
 
-    XPLMDrawString(color.data(), 0, 0, text.c_str(), nullptr, xplmFont_Proportional);
+    XPLMDrawString(color.data(), 0, 0, const_cast<char *>(text.c_str()), nullptr, xplmFont_Proportional);
     glPopMatrix();
 
     return textWidth;

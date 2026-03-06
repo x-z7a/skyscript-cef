@@ -81,8 +81,8 @@ bool AppState::initialize() {
 
     browser->initialize();
 
-    Dataref::getInstance()->createDataref<bool>("avitab_browser/visible", &browserVisible);
-    Dataref::getInstance()->createCommand("avitab_browser/toggle", "Show or hide the browser window", [this](XPLMCommandPhase inPhase) {
+    Dataref::getInstance()->createDataref<bool>("skyscript/visible", &browserVisible);
+    Dataref::getInstance()->createCommand("skyscript/toggle", "Show or hide the browser window", [this](XPLMCommandPhase inPhase) {
         if (inPhase != xplm_CommandBegin) {
             return;
         }

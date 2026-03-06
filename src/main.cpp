@@ -1,5 +1,5 @@
 #ifndef XPLM301
-    #error This is made to be compiled against the X-Plane 4.2.0 SDK for XP11 and XP12
+    #error This project requires the X-Plane 4.2.0 SDK for X-Plane 12
 #endif
 
 #include "config.h"
@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include <XPLMDisplay.h>
+#include <XPLMGraphics.h>
 #include <XPLMMenus.h>
 #include <XPLMPlugin.h>
 #include <XPLMProcessing.h>
@@ -71,7 +72,7 @@ PLUGIN_API int XPluginStart(char * name, char * sig, char * desc)
     debug("Plugin started (version %s)\n", VERSION);
 
 #if DEBUG
-    Dataref::getInstance()->createCommand("avitab_browser/debug/window_to_foreground", "Bring window to front", [](XPLMCommandPhase inPhase) {
+    Dataref::getInstance()->createCommand("skyscript/debug/window_to_foreground", "Bring window to front", [](XPLMCommandPhase inPhase) {
         if (inPhase != xplm_CommandBegin) {
             return;
         }
@@ -177,17 +178,17 @@ void menuAction(void* mRef, void* iRef) {
 
             float x = left + 16.0f;
             float y = top - 16.0f;
-            XPLMDrawString(color, x, y, FRIENDLY_NAME, nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, const_cast<char *>(FRIENDLY_NAME), nullptr, xplmFont_Proportional);
             y -= 16.0f;
-            XPLMDrawString(color, x, y, "Version " VERSION, nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, const_cast<char *>("Version " VERSION), nullptr, xplmFont_Proportional);
             y -= 32.0f;
-            XPLMDrawString(color, x, y, "Standalone browser window for X-Plane.", nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, const_cast<char *>("Standalone browser window for X-Plane."), nullptr, xplmFont_Proportional);
             y -= 16.0f;
-            XPLMDrawString(color, x, y, "This software is licensed under the GNU General Public License, GPL-3.0", nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, const_cast<char *>("This software is licensed under the GNU General Public License, GPL-3.0"), nullptr, xplmFont_Proportional);
             y -= 32.0f;
-            XPLMDrawString(color, x, y, "For updates, see x-plane.org or github.com/rswilem/avitab-browser.", nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, const_cast<char *>("For updates, see github.com/x-z7a/skyscript-cef."), nullptr, xplmFont_Proportional);
             y -= 16.0f;
-            XPLMDrawString(color, x, y, "Existing avitab_browser commands/datarefs remain for compatibility.", nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, const_cast<char *>("Commands and datarefs use the skyscript/* namespace."), nullptr, xplmFont_Proportional);
         };
 
         params.handleMouseClickFunc = nullptr;

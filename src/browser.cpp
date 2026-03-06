@@ -81,7 +81,7 @@ void Browser::initialize() {
     currentUrl = AppState::getInstance()->config.homepage;
     allocateTexture();
 
-    Dataref::getInstance()->createDataref<std::string>("avitab_browser/url", &currentUrl, true, [this](std::string newUrl) {
+    Dataref::getInstance()->createDataref<std::string>("skyscript/url", &currentUrl, true, [this](std::string newUrl) {
         if (!newUrl.starts_with("http") && !newUrl.starts_with("chrome://") && !newUrl.starts_with("data:")) {
             return false;
         }
@@ -90,7 +90,7 @@ void Browser::initialize() {
         return true;
     });
 
-    Dataref::getInstance()->createCommand("avitab_browser/refresh", "Refresh the current web page", [this](XPLMCommandPhase inPhase) {
+    Dataref::getInstance()->createCommand("skyscript/refresh", "Refresh the current web page", [this](XPLMCommandPhase inPhase) {
         if (inPhase != xplm_CommandBegin) {
             return;
         }
@@ -442,15 +442,11 @@ bool Browser::createBrowser() {
     }
 
 #if APL
-    #if XPLANE_VERSION == 12
-        CefScopedLibraryLoader library_loader;
-        if (!library_loader.LoadInMain()) {
-            debug("Could not load CEF library dylib (CefScopedLibraryLoader)!\n");
-            return false;
-        }
-    #else
-        cef_load_library((Path::getInstance()->pluginDirectory + "/mac_x64/Chromium Embedded Framework.framework/Chromium Embedded Framework").c_str());
-    #endif
+    CefScopedLibraryLoader library_loader;
+    if (!library_loader.LoadInMain()) {
+        debug("Could not load the CEF framework.\n");
+        return false;
+    }
 #endif
 
     std::string cachePath = Path::getInstance()->pluginDirectory + "/cache";
@@ -493,11 +489,6 @@ bool Browser::createBrowser() {
         case xplm_Language_Chinese:
             language = "zh-CN,zh";
             break;
-#if XPLANE_VERSION == 12
-        case xplm_Language_Ukrainian:
-            language = "uk-UA,uk";
-            break;
-#endif
         case xplm_Language_Unknown:
         default:
             break;
@@ -518,37 +509,6 @@ bool Browser::createBrowser() {
     CefBrowserSettings browser_settings;
     browser_settings.windowless_frame_rate = AppState::getInstance()->config.framerate;
     browser_settings.background_color = CefColorSetARGB(0xFF, 0xFF, 0xFF, 0xFF);
-
-#if XPLANE_VERSION == 11
-    CefRefPtr<CefApp> app;
-    CefSettings settings;
-    settings.windowless_rendering_enabled = true;
-    CefString(&settings.cache_path) = cachePath;
-
-#if IBM
-    CefMainArgs main_args(GetModuleHandle(nullptr));
-    CefString(&settings.resources_dir_path) = Path::getInstance()->pluginDirectory + "/win_x64/res";
-    CefString(&settings.locales_dir_path) = Path::getInstance()->pluginDirectory + "/win_x64/res/locales";
-    CefString(&settings.browser_subprocess_path) = Path::getInstance()->pluginDirectory + "/win_x64/avitab_cef_helper.exe";
-#elif APL
-    settings.no_sandbox = true;
-    CefMainArgs main_args;
-    CefString(&settings.locales_dir_path) = Path::getInstance()->pluginDirectory + "/mac_x64/Chromium Embedded Framework.framework/Resources";
-    CefString(&settings.resources_dir_path) = Path::getInstance()->pluginDirectory + "/mac_x64/Chromium Embedded Framework.framework/Resources";
-    CefString(&settings.main_bundle_path) = Path::getInstance()->pluginDirectory + "/mac_x64/cefclient Helper.app";
-    CefString(&settings.framework_dir_path) = Path::getInstance()->pluginDirectory + "/mac_x64/Chromium Embedded Framework.framework";
-    CefString(&settings.browser_subprocess_path) = Path::getInstance()->pluginDirectory + "/mac_x64/cefclient Helper.app/Contents/MacOS/cefclient Helper";
-#elif LIN
-    CefMainArgs main_args;
-#endif
-
-    debug("Initializing a new CEF instance for X-Plane 11...\n");
-    if (!CefInitialize(main_args, settings, app, nullptr)) {
-        debug("Could not initialize CEF instance.\n");
-        return false;
-    }
-    debug("CEF instance for X-Plane 11 has been set up successfully.\n");
-#endif
 
     const auto& viewport = AppState::getInstance()->viewport;
     handler = CefRefPtr<BrowserHandler>(new BrowserHandler(textureId, &currentUrl, viewport.browserWidth, viewport.browserHeight));
@@ -587,7 +547,7 @@ void Browser::updateGPSLocation() {
     float airspeedKts = Dataref::getInstance()->get<float>("sim/flightmodel/position/indicated_airspeed");
 
     std::stringstream stream;
-    stream << "window.avitab_location = { ";
+    stream << "window.skyscript_location = { ";
     stream << "coords: { ";
     stream << "latitude: " << std::fixed << std::setprecision(6) << latitude << ", ";
     stream << "longitude: " << std::fixed << std::setprecision(6) << longitude << ", ";
@@ -604,7 +564,7 @@ void Browser::updateGPSLocation() {
     stream << "extra: { ";
     stream << "altitudeAgl: " << std::fixed << std::setprecision(0) << altitudeMetersAboveGroundLevel << ", ";
     stream << "airspeedKts: " << std::fixed << std::setprecision(0) << airspeedKts << ", ";
-    stream <<  "}, timestamp: Date.now() }; for (let key in window.avitab_watchers) { window.avitab_watchers[key](window.avitab_location); }";
+    stream <<  "}, timestamp: Date.now() }; for (let key in window.skyscript_watchers) { window.skyscript_watchers[key](window.skyscript_location); }";
 
     handler->browserInstance->GetMainFrame()->ExecuteJavaScript(stream.str(), handler->browserInstance->GetMainFrame()->GetURL(), 0);
     lastGpsUpdateTime = XPLMGetElapsedTime();
