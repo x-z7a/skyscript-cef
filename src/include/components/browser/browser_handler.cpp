@@ -27,6 +27,7 @@ BrowserHandler::BrowserHandler(int aTextureId, std::string *aCurrentUrl, unsigne
     textureId = aTextureId;
     popupRect = {0, 0, 0, 0};
     popupShown = false;
+    needsFullDraw = true;
     currentUrl = aCurrentUrl;
     windowWidth = aWidth;
     windowHeight = aHeight;
@@ -44,8 +45,18 @@ BrowserHandler::~BrowserHandler() {
 
 void BrowserHandler::destroy() {
     textureId = 0;
+    popupShown = false;
+    needsFullDraw = true;
     cursorState = CursorDefault;
     hasInputFocus = false;
+}
+
+void BrowserHandler::setViewSize(unsigned short width, unsigned short height) {
+    windowWidth = width;
+    windowHeight = height;
+    popupRect = {0, 0, 0, 0};
+    popupShown = false;
+    needsFullDraw = true;
 }
 
 void BrowserHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
@@ -55,20 +66,12 @@ void BrowserHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 
 bool BrowserHandler::DoClose(CefRefPtr<CefBrowser> browser) {
     textureId = 0;
-
-    if (AppState::getInstance()->statusbar) {
-        AppState::getInstance()->statusbar->setActiveTab("");
-    }
     return false;
 }
 
 void BrowserHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     textureId = 0;
     browserInstance = nullptr;
-
-    if (AppState::getInstance()->statusbar) {
-        AppState::getInstance()->statusbar->setActiveTab("");
-    }
 }
 
 bool BrowserHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &target_url, const CefString &target_frame_name, CefLifeSpanHandler::WindowOpenDisposition target_disposition, bool user_gesture, const CefPopupFeatures &popupFeatures, CefWindowInfo &windowInfo, CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info, bool *no_javascript_access) {
@@ -98,7 +101,8 @@ void BrowserHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect) {
 }
 
 void BrowserHandler::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString &title) {
-    AppState::getInstance()->statusbar->setActiveTab(title.ToString());
+    (void)browser;
+    (void)title;
 }
 
 void BrowserHandler::OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList &dirtyRects, const void *buffer, int width, int height) {
@@ -173,7 +177,9 @@ void BrowserHandler::OnVirtualKeyboardRequested(CefRefPtr<CefBrowser> browser, T
 }
 
 void BrowserHandler::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) {
-    AppState::getInstance()->statusbar->loading = isLoading;
+    (void)isLoading;
+    (void)canGoBack;
+    (void)canGoForward;
 
     if (!isLoading) {
         injectAddressBar(browser);

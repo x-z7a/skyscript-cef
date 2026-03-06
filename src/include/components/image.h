@@ -8,8 +8,8 @@ private:
     int textureId;
     
 protected:
-    short x;
-    short y;
+    float x;
+    float y;
     unsigned short rotationDegrees;
     
 public:
@@ -24,6 +24,8 @@ public:
     void draw(unsigned short rotationDegrees);
     virtual void draw();
     virtual void setPosition(float normalizedX, float normalizedY, unsigned short rotationDegrees = 0);
+    float displayWidth() const;
+    float displayHeight() const;
 };
 
 #endif

@@ -7,11 +7,11 @@
 #include <cmath>
 
 float Drawing::AbsoluteX(float normalizedX) {
-    return AppState::getInstance()->tabletDimensions.x + AppState::getInstance()->tabletDimensions.width * normalizedX;
+    return AppState::getInstance()->viewport.x + AppState::getInstance()->viewport.width * normalizedX;
 }
 
 float Drawing::AbsoluteY(float normalizedY) {
-    return AppState::getInstance()->tabletDimensions.y + AppState::getInstance()->tabletDimensions.height * normalizedY;
+    return AppState::getInstance()->viewport.y + AppState::getInstance()->viewport.height * normalizedY;
 }
 
 void Drawing::DrawLine(float x1, float y1, float x2, float y2, float thickness) {
@@ -146,7 +146,7 @@ std::vector<std::string> Drawing::WrapWordsToLines(XPLMFontID font, const std::s
             spaceLeft -= wordWidth + spaceWidth;
         } else {
             lines.push_back(word);
-            float widthPixels = AppState::getInstance()->tabletDimensions.width * normalizedWidth;
+            float widthPixels = AppState::getInstance()->viewport.width * normalizedWidth;
             spaceLeft = widthPixels - wordWidth;
         }
     }
@@ -156,7 +156,7 @@ std::vector<std::string> Drawing::WrapWordsToLines(XPLMFontID font, const std::s
 
 float Drawing::TextWidth(std::string text, float scale) {
     float textWidth = XPLMMeasureString(xplmFont_Proportional, text.c_str(), (int) text.length()) * scale;
-    return textWidth / AppState::getInstance()->tabletDimensions.width;
+    return textWidth / AppState::getInstance()->viewport.width;
 }
 
 float Drawing::DrawText(std::string text, float x, float y, float scale, std::array<float, 3> color) {

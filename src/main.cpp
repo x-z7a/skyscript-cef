@@ -4,17 +4,18 @@
 
 #include "config.h"
 #include "appstate.h"
+#include "cursor.h"
 #include "dataref.h"
 #include "path.h"
+
 #include <algorithm>
-#include <XPLMDisplay.h>
-#include <XPLMPlugin.h>
-#include <XPLMMenus.h>
-#include <XPLMProcessing.h>
-#include <XPLMMenus.h>
 #include <cmath>
-#include "drawing.h"
-#include "cursor.h"
+#include <cstring>
+
+#include <XPLMDisplay.h>
+#include <XPLMMenus.h>
+#include <XPLMPlugin.h>
+#include <XPLMProcessing.h>
 
 #if IBM
 #include <windows.h>
@@ -27,19 +28,20 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         case DLL_PROCESS_DETACH:
             break;
     }
-    
+
     return TRUE;
 }
 #endif
 
 PLUGIN_API void XPluginReceiveMessage(XPLMPluginID from, long msg, void* params);
-int draw(XPLMDrawingPhase inPhase, int inIsBefore, void * inRefcon);
 float update(float inElapsedSinceLastCall, float inElapsedTimeSinceLastFlightLoop, int inCounter, void *inRefcon);
 int mouseClicked(XPLMWindowID inWindowID, int x, int y, XPLMMouseStatus status, void* inRefcon);
+int mouseWheel(XPLMWindowID inWindowID, int x, int y, int wheel, int clicks, void* inRefcon);
+int mouseCursor(XPLMWindowID inWindowID, int x, int y, void* inRefcon);
+void keyPressed(XPLMWindowID inWindowID, char key, XPLMKeyFlags flags, char virtualKey, void* inRefcon, int losingFocus);
 void menuAction(void* mRef, void* iRef);
 void registerWindow();
 void captureVrChanges();
-void captureClickEvents(bool enable);
 
 unsigned char pressedKeyCode = 0;
 unsigned char pressedVirtualKeyCode = 0;
@@ -49,62 +51,59 @@ PLUGIN_API int XPluginStart(char * name, char * sig, char * desc)
 {
     strcpy(name, FRIENDLY_NAME);
     strcpy(sig, BUNDLE_ID);
-    strcpy(desc, "Browser extension for the Avitab");
+    strcpy(desc, "Standalone browser window for X-Plane");
     XPLMEnableFeature("XPLM_USE_NATIVE_PATHS", 1);
     XPLMEnableFeature("XPLM_USE_NATIVE_WIDGET_WINDOWS", 1);
-    
+
     int item = XPLMAppendMenuItem(XPLMFindPluginsMenu(), FRIENDLY_NAME, nullptr, 1);
     XPLMMenuID id = XPLMCreateMenu(FRIENDLY_NAME, XPLMFindPluginsMenu(), item, menuAction, nullptr);
+    XPLMAppendMenuItem(id, "Toggle browser window", (void *)"ActionToggleBrowser", 0);
     XPLMAppendMenuItem(id, "Reload configuration", (void *)"ActionReloadConfig", 0);
     XPLMAppendMenuItem(id, "About", (void *)"ActionAbout", 0);
 
     XPLMRegisterFlightLoopCallback(update, REFRESH_INTERVAL_SECONDS_SLOW, nullptr);
-    XPLMRegisterDrawCallback(draw, xplm_Phase_Gauges, 0, nullptr);
-    
+
     XPluginReceiveMessage(0, XPLM_MSG_PLANE_LOADED, nullptr);
-    
+
     captureVrChanges();
     initializeCursor();
-    
+
     debug("Plugin started (version %s)\n", VERSION);
-    
-    #if DEBUG
+
+#if DEBUG
     Dataref::getInstance()->createCommand("avitab_browser/debug/window_to_foreground", "Bring window to front", [](XPLMCommandPhase inPhase) {
         if (inPhase != xplm_CommandBegin) {
             return;
         }
-        
-        XPLMBringWindowToFront(AppState::getInstance()->mainWindow);
+
+        if (AppState::getInstance()->mainWindow) {
+            XPLMBringWindowToFront(AppState::getInstance()->mainWindow);
+        }
     });
-    
-    Dataref::getInstance()->createCommand("avitab_browser/debug/vr_click_proxy", "sim/VR/reserved/select", [](XPLMCommandPhase inPhase) {
-        Dataref::getInstance()->executeCommand("sim/VR/reserved/select", inPhase);
-    });
-    #endif
-    
+#endif
+
     return 1;
 }
 
 PLUGIN_API void XPluginStop(void) {
-    XPLMUnregisterDrawCallback(draw, xplm_Phase_Gauges, 0, nullptr);
     XPLMUnregisterFlightLoopCallback(update, nullptr);
-    XPLMDestroyWindow(AppState::getInstance()->mainWindow);
-    AppState::getInstance()->mainWindow = nullptr;
-    
+    if (AppState::getInstance()->mainWindow) {
+        XPLMDestroyWindow(AppState::getInstance()->mainWindow);
+        AppState::getInstance()->mainWindow = nullptr;
+    }
+
     destroyCursor();
-    captureClickEvents(false);
-    
     AppState::getInstance()->deinitialize();
     debug("Plugin stopped\n");
 }
 
 PLUGIN_API int XPluginEnable(void) {
     Path::getInstance()->reloadPaths();
-    
-    if (AppState::getInstance()->mainWindow) {
+
+    if (AppState::getInstance()->mainWindow && AppState::getInstance()->browserVisible) {
         XPLMBringWindowToFront(AppState::getInstance()->mainWindow);
     }
-    
+
     return 1;
 }
 
@@ -116,36 +115,44 @@ PLUGIN_API void XPluginReceiveMessage(XPLMPluginID from, long msg, void* params)
     switch (msg) {
         case XPLM_MSG_PLANE_LOADED:
             if ((intptr_t)params != 0) {
-                // It was not the user's plane. Ignore.
                 return;
             }
 
-            if (AppState::getInstance()->initialize()) {                
+            if (AppState::getInstance()->initialize()) {
                 registerWindow();
-                captureClickEvents(true);
             }
             break;
-            
+
         case XPLM_MSG_PLANE_CRASHED:
             break;
-            
+
         case XPLM_MSG_PLANE_UNLOADED:
             if ((intptr_t)params != 0) {
-                // It was not the user's plane. Ignore.
                 return;
             }
-            
-            Dataref::getInstance()->executeCommand("AviTab/Home");
+
+            if (AppState::getInstance()->mainWindow) {
+                XPLMDestroyWindow(AppState::getInstance()->mainWindow);
+                AppState::getInstance()->mainWindow = nullptr;
+            }
             AppState::getInstance()->deinitialize();
             break;
-            
+
         default:
             break;
     }
 }
 
 void menuAction(void* mRef, void* iRef) {
-    if (!strcmp((char *)iRef, "ActionAbout")) {
+    if (!strcmp((char *)iRef, "ActionToggleBrowser")) {
+        if (AppState::getInstance()->browserVisible) {
+            AppState::getInstance()->hideBrowser();
+        }
+        else {
+            AppState::getInstance()->showBrowser();
+        }
+    }
+    else if (!strcmp((char *)iRef, "ActionAbout")) {
         int winLeft, winTop, winRight, winBot;
         XPLMGetScreenBoundsGlobal(&winLeft, &winTop, &winRight, &winBot);
         XPLMCreateWindow_t params;
@@ -154,7 +161,6 @@ void menuAction(void* mRef, void* iRef) {
         float width = 450.0f;
         float height = 180.0f;
 
-        // Calculate centered position for the window
         params.structSize = sizeof(params);
         params.left = (int)(winLeft + (screenWidth - width) / 2);
         params.right = params.left + width;
@@ -162,37 +168,28 @@ void menuAction(void* mRef, void* iRef) {
         params.bottom = params.top - height;
         params.visible = 1;
         params.refcon = nullptr;
-        params.drawWindowFunc = [](XPLMWindowID inWindowID, void *drawingRef){
-            XPLMSetGraphicsState(
-                                 0, // No fog, equivalent to glDisable(GL_FOG);
-                                 0, // One texture, equivalent to glEnable(GL_TEXTURE_2D);
-                                 0, // No lighting, equivalent to glDisable(GL_LIGHT0);
-                                 0, // No alpha testing, e.g glDisable(GL_ALPHA_TEST);
-                                 1, // Use alpha blending, e.g. glEnable(GL_BLEND);
-                                 0, // No depth read, e.g. glDisable(GL_DEPTH_TEST);
-                                 0 // No depth write, e.g. glDepthMask(GL_FALSE);
-            );
-            glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
-            
+        params.drawWindowFunc = [](XPLMWindowID inWindowID, void *drawingRef) {
+            XPLMSetGraphicsState(0, 0, 0, 0, 1, 0, 0);
+
             int left, top, right, bottom;
             XPLMGetWindowGeometry(inWindowID, &left, &top, &right, &bottom);
             float color[] = {1.0f, 1.0f, 1.0f};
-            
+
             float x = left + 16.0f;
             float y = top - 16.0f;
             XPLMDrawString(color, x, y, FRIENDLY_NAME, nullptr, xplmFont_Proportional);
             y -= 16.0f;
             XPLMDrawString(color, x, y, "Version " VERSION, nullptr, xplmFont_Proportional);
             y -= 32.0f;
+            XPLMDrawString(color, x, y, "Standalone browser window for X-Plane.", nullptr, xplmFont_Proportional);
+            y -= 16.0f;
             XPLMDrawString(color, x, y, "This software is licensed under the GNU General Public License, GPL-3.0", nullptr, xplmFont_Proportional);
             y -= 32.0f;
-            XPLMDrawString(color, x, y, "For updates to " FRIENDLY_NAME ", please see the forums at x-plane.org", nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, "For updates, see x-plane.org or github.com/rswilem/avitab-browser.", nullptr, xplmFont_Proportional);
             y -= 16.0f;
-            XPLMDrawString(color, x, y, "or checkout the GitHub releases at github.com/rswilem/avitab-browser.", nullptr, xplmFont_Proportional);
-            y -= 16.0f;
-            XPLMDrawString(color, x, y, "Made with love by TheRamon, thank you for using this software!", nullptr, xplmFont_Proportional);
+            XPLMDrawString(color, x, y, "Existing avitab_browser commands/datarefs remain for compatibility.", nullptr, xplmFont_Proportional);
         };
-        
+
         params.handleMouseClickFunc = nullptr;
         params.handleRightClickFunc = nullptr;
         params.handleMouseWheelFunc = nullptr;
@@ -207,61 +204,58 @@ void menuAction(void* mRef, void* iRef) {
     }
     else if (!strcmp((char *)iRef, "ActionReloadConfig")) {
         AppState::getInstance()->loadConfig();
-        
-        if (AppState::getInstance()->mainWindow) {
+
+        if (AppState::getInstance()->mainWindow && AppState::getInstance()->browserVisible) {
             XPLMBringWindowToFront(AppState::getInstance()->mainWindow);
         }
     }
 }
 
 void keyPressed(XPLMWindowID inWindowID, char key, XPLMKeyFlags flags, char virtualKey, void* inRefcon, int losingFocus) {
+    if (!AppState::getInstance()->browserVisible) {
+        return;
+    }
+
     if ((flags & xplm_DownFlag) == xplm_DownFlag) {
         pressedKeyCode = key;
         pressedVirtualKeyCode = virtualKey;
         pressedKeyTime = XPLMGetElapsedTime();
         AppState::getInstance()->browser->key(key, virtualKey, flags);
     }
-    
+
     if ((flags & xplm_UpFlag) == xplm_UpFlag) {
         pressedKeyCode = 0;
         pressedVirtualKeyCode = 0;
         pressedKeyTime = 0;
         AppState::getInstance()->browser->key(key, virtualKey, flags);
     }
-    
+
     if (losingFocus) {
         AppState::getInstance()->browser->setFocus(false);
     }
 }
 
 int mouseClicked(XPLMWindowID inWindowID, int x, int y, XPLMMouseStatus status, void* inRefcon) {
-    if (!AppState::getInstance()->hasPower) {
+    if (!AppState::getInstance()->browserVisible) {
         return 0;
     }
-    
+
     float mouseX, mouseY;
-    if (!Dataref::getInstance()->getMouse(&mouseX, &mouseY, x, y)) {
-        if (AppState::getInstance()->browserVisible && AppState::getInstance()->browser->hasInputFocus()) {
+    if (!AppState::getInstance()->normalizeWindowPoint(x, y, &mouseX, &mouseY)) {
+        if (AppState::getInstance()->browser->hasInputFocus()) {
             AppState::getInstance()->browser->setFocus(false);
         }
         return 0;
     }
-    
-    if (status == xplm_MouseDown) {
-        bool didConsume = AppState::getInstance()->updateButtons(mouseX, mouseY, kButtonClick);
-        if (didConsume) {
-            return 1;
-        }
+
+    if (status == xplm_MouseDown && AppState::getInstance()->updateButtons(mouseX, mouseY, kButtonClick)) {
+        return 1;
     }
-    
-    if (!AppState::getInstance()->browserVisible) {
-        return 0;
-    }
-    
+
     if (AppState::getInstance()->browser->click(status, mouseX, mouseY)) {
         return 1;
     }
-    
+
     AppState::getInstance()->browser->setFocus(false);
     return 0;
 }
@@ -270,34 +264,31 @@ int mouseWheel(XPLMWindowID inWindowID, int x, int y, int wheel, int clicks, voi
     if (!AppState::getInstance()->browserVisible) {
         return 0;
     }
-    
+
     float mouseX, mouseY;
-    if (!Dataref::getInstance()->getMouse(&mouseX, &mouseY, x, y)) {
+    if (!AppState::getInstance()->normalizeWindowPoint(x, y, &mouseX, &mouseY)) {
         return 0;
     }
-    
+
     bool horizontal = wheel == 1;
     AppState::getInstance()->browser->scroll(mouseX, mouseY, clicks * AppState::getInstance()->config.scroll_speed, horizontal);
     return 1;
 }
 
 int mouseCursor(XPLMWindowID inWindowID, int x, int y, void* inRefcon) {
+    float mouseX, mouseY;
+    if (!AppState::getInstance()->normalizeWindowPoint(x, y, &mouseX, &mouseY)) {
+        AppState::getInstance()->activeCursor = CursorDefault;
+        return xplm_CursorDefault;
+    }
+
+    AppState::getInstance()->browser->mouseMove(mouseX, mouseY);
+
     bool isVREnabled = Dataref::getInstance()->getCached<int>("sim/graphics/VR/enabled");
     if (isVREnabled) {
         return xplm_CursorDefault;
     }
-    
-    if (!AppState::getInstance()->hasPower) {
-        AppState::getInstance()->activeCursor = CursorDefault;
-        return xplm_CursorDefault;
-    }
-    
-    float mouseX, mouseY;
-    if (!Dataref::getInstance()->getMouse(&mouseX, &mouseY, x, y)) {
-        AppState::getInstance()->activeCursor = CursorDefault;
-        return xplm_CursorDefault;
-    }
-    
+
     CursorType wantedCursor = CursorDefault;
     if (AppState::getInstance()->updateButtons(mouseX, mouseY, kButtonHover)) {
         wantedCursor = CursorHand;
@@ -305,17 +296,17 @@ int mouseCursor(XPLMWindowID inWindowID, int x, int y, void* inRefcon) {
     else if (AppState::getInstance()->browserVisible && AppState::getInstance()->browser->cursor() != CursorDefault) {
         wantedCursor = AppState::getInstance()->browser->cursor();
     }
-    
+
     if (wantedCursor == CursorDefault) {
         AppState::getInstance()->activeCursor = CursorDefault;
         return xplm_CursorDefault;
     }
-    
+
     if (wantedCursor != AppState::getInstance()->activeCursor) {
         AppState::getInstance()->activeCursor = wantedCursor;
         setCursor(wantedCursor);
     }
-    
+
     return xplm_CursorCustom;
 }
 
@@ -326,19 +317,17 @@ float update(float inElapsedSinceLastCall, float inElapsedTimeSinceLastFlightLoo
 
     Dataref::getInstance()->update();
     AppState::getInstance()->update();
-    AppState::getInstance()->statusbar->update();
 
-    AppState::getInstance()->browser->update();
     if (!AppState::getInstance()->browserVisible) {
-        return REFRESH_INTERVAL_SECONDS_FAST;
+        return REFRESH_INTERVAL_SECONDS_SLOW;
     }
-    
+
 #ifndef DEBUG
     if (pressedKeyTime > 0 && XPLMGetElapsedTime() > pressedKeyTime + 0.3f) {
         AppState::getInstance()->browser->key(pressedKeyCode, pressedVirtualKeyCode);
     }
 #endif
-    
+
     if (AppState::getInstance()->browser->hasInputFocus() != XPLMHasKeyboardFocus(AppState::getInstance()->mainWindow)) {
         if (AppState::getInstance()->browser->hasInputFocus()) {
             AppState::getInstance()->browser->setFocus(true);
@@ -351,119 +340,57 @@ float update(float inElapsedSinceLastCall, float inElapsedTimeSinceLastFlightLoo
         }
     }
 
-    float mouseX, mouseY;
-    if (Dataref::getInstance()->getMouse(&mouseX, &mouseY)) {
-        AppState::getInstance()->browser->mouseMove(mouseX, mouseY);
-    }
-    
     return REFRESH_INTERVAL_SECONDS_FAST;
-}
-
-int draw(XPLMDrawingPhase inPhase, int inIsBefore, void * inRefcon) {
-    AppState::getInstance()->draw();
-    return 1;
 }
 
 void registerWindow() {
     if (AppState::getInstance()->mainWindow) {
         XPLMDestroyWindow(AppState::getInstance()->mainWindow);
-        AppState::getInstance()->mainWindow = 0;
+        AppState::getInstance()->mainWindow = nullptr;
     }
-    
+
     int winLeft, winTop, winRight, winBot;
     XPLMGetScreenBoundsGlobal(&winLeft, &winTop, &winRight, &winBot);
+
+    float screenWidth = fabs(winLeft - winRight);
+    float screenHeight = fabs(winTop - winBot);
+    int width = AppState::defaultWindowWidth;
+    int height = AppState::defaultWindowHeight;
+
     XPLMCreateWindow_t params;
     params.structSize = sizeof(params);
-    params.left = winLeft;
-    params.right = winRight;
-    params.top = winTop;
-    params.bottom = winBot;
-    params.visible = 1;
+    params.left = (int)(winLeft + (screenWidth - width) / 2);
+    params.right = params.left + width;
+    params.top = (int)(winTop - (screenHeight - height) / 2);
+    params.bottom = params.top - height;
+    params.visible = 0;
     params.refcon = nullptr;
-    params.drawWindowFunc = [](XPLMWindowID, void *){};
+    params.drawWindowFunc = [](XPLMWindowID, void *) {
+        AppState::getInstance()->draw();
+    };
     params.handleMouseClickFunc = mouseClicked;
     params.handleRightClickFunc = nullptr;
     params.handleMouseWheelFunc = mouseWheel;
     params.handleKeyFunc = keyPressed;
     params.handleCursorFunc = mouseCursor;
-    params.layer = Dataref::getInstance()->get<bool>("sim/graphics/VR/enabled") ? xplm_WindowLayerFloatingWindows : xplm_WindowLayerFlightOverlay;
-    params.decorateAsFloatingWindow = xplm_WindowDecorationNone;
-    
+    params.layer = xplm_WindowLayerFloatingWindows;
+    params.decorateAsFloatingWindow = xplm_WindowDecorationRoundRectangle;
+
     AppState::getInstance()->mainWindow = XPLMCreateWindowEx(&params);
-    XPLMSetWindowPositioningMode(AppState::getInstance()->mainWindow, xplm_WindowFullScreenOnMonitor, -1);
-    
-    XPLMBringWindowToFront(AppState::getInstance()->mainWindow);
+    XPLMSetWindowTitle(AppState::getInstance()->mainWindow, FRIENDLY_NAME);
+    XPLMSetWindowResizingLimits(AppState::getInstance()->mainWindow, 640, 480, 4096, 4096);
+    AppState::getInstance()->syncWindowGeometry(false);
+    AppState::getInstance()->applyWindowMode();
+    XPLMSetWindowIsVisible(AppState::getInstance()->mainWindow, 0);
 }
 
 void captureVrChanges() {
-    std::function setVrWindowPositioningMode = [](){
-        XPLMBringWindowToFront(AppState::getInstance()->mainWindow);
-        
-        if (Dataref::getInstance()->get<bool>("sim/graphics/VR/using_3d_mouse")) {
-            XPLMSetWindowPositioningMode(AppState::getInstance()->mainWindow, xplm_WindowVR, -1);
+    Dataref::getInstance()->monitorExistingDataref<bool>("sim/graphics/VR/enabled", [](bool isVrEnabled) {
+        if (!AppState::getInstance()->mainWindow) {
+            return;
         }
-        else {
-            XPLMSetWindowPositioningMode(AppState::getInstance()->mainWindow, xplm_WindowFullScreenOnMonitor, -1);
-        }
-    };
-    
-    Dataref::getInstance()->monitorExistingDataref<bool>("sim/graphics/VR/enabled", [setVrWindowPositioningMode](bool isVrEnabled) {
-        registerWindow();
-        
-        if (isVrEnabled) {
-            setVrWindowPositioningMode();
-            
-            debug("VR is now enabled.\n");
-            Dataref::getInstance()->bindExistingCommand("sim/VR/reserved/select", [](XPLMCommandPhase inPhase) {
-                if (inPhase == xplm_CommandBegin) {
-                    mouseClicked(0, -1, -1, xplm_MouseDown, nullptr);
-                }
-                else if (inPhase == xplm_CommandContinue) {
-                    mouseClicked(0, -1, -1, xplm_MouseDrag, nullptr);
-                }
-                else if (inPhase == xplm_CommandEnd) {
-                    mouseClicked(0, -1, -1, xplm_MouseUp, nullptr);
-                }
-                
-                return 1;
-            });
-        }
-        else {
-            debug("VR is disabled.\n");
-            Dataref::getInstance()->unbind("sim/VR/reserved/select");
-            setVrWindowPositioningMode();
-        }
-    });
-    
-    Dataref::getInstance()->monitorExistingDataref<bool>("sim/graphics/VR/using_3d_mouse", [setVrWindowPositioningMode](bool isVrUsingMouse) {
-        setVrWindowPositioningMode();
+
+        AppState::getInstance()->applyWindowMode();
+        debug("VR is now %s.\n", isVrEnabled ? "enabled" : "disabled");
     });
 }
-
-void captureClickEvents(bool enable) {
-    if (!AppState::getInstance()->shouldCaptureClickEvents) {
-        return;
-    }
-    
-    if (enable) {
-        debug("Start capturing AviTab click events.\n");
-        Dataref::getInstance()->bindExistingCommand("AviTab/click_left", [](XPLMCommandPhase inPhase) {
-            if (inPhase == xplm_CommandBegin) {
-                mouseClicked(0, -1, -1, xplm_MouseDown, nullptr);
-            }
-            else if (inPhase == xplm_CommandContinue) {
-                mouseClicked(0, -1, -1, xplm_MouseDrag, nullptr);
-            }
-            else if (inPhase == xplm_CommandEnd) {
-                mouseClicked(0, -1, -1, xplm_MouseUp, nullptr);
-            }
-            
-            return 1;
-        });
-    }
-    else {
-        debug("Stopped capturing AviTab click events.\n");
-        Dataref::getInstance()->unbind("AviTab/click_left");
-    }
-}
-

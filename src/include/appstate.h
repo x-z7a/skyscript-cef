@@ -6,12 +6,11 @@
 #include <XPLMDisplay.h>
 #include "button.h"
 #include "browser.h"
-#include "statusbar.h"
 #include "notification.h"
 
-struct AvitabDimensions {
-    short x;
-    short y;
+struct WindowViewport {
+    int x;
+    int y;
     unsigned short width;
     unsigned short height;
     unsigned short textureWidth;
@@ -30,25 +29,11 @@ struct AppConfiguration {
     std::string user_agent;
     bool hide_addressbar;
     unsigned char framerate;
-    struct StatusBarIcon {
-        std::string icon;
-        std::string url;
-    };
-    std::vector<StatusBarIcon> statusbarIcons;
 #if DEBUG
     float debug_value_1;
     float debug_value_2;
     float debug_value_3;
 #endif
-};
-
-enum AircraftVariant: unsigned char {
-    VariantUnknown = 0,
-    VariantZibo738,
-    VariantFelis742,
-    VariantLevelUp737,
-    VariantJustFlight,
-    VariantIXEG737,
 };
 
 typedef std::function<void()> CallbackFunc;
@@ -64,26 +49,24 @@ private:
     ~AppState();
     static AppState* instance;
     std::string remoteVersion;
-    bool shouldBrowserVisible;
     std::vector<DelayedTask> tasks;
     std::vector<Button *> buttons;
     Notification *notification;
-    Button *mainMenuButton;
-    bool loadAvitabConfig();
     bool fileExists(std::string filename);
-    void determineAircraftVariant();
+    bool setViewport(int x, int y, unsigned short width, unsigned short height);
 
 public:
+    static constexpr unsigned short defaultWindowWidth = 1024;
+    static constexpr unsigned short defaultWindowHeight = 768;
+    static constexpr float browserTopRatio = 0.935f;
+    static constexpr float toolbarY = 0.967f;
+
     XPLMWindowID mainWindow;
     float brightness;
-    AvitabDimensions tabletDimensions;
+    WindowViewport viewport;
     AppConfiguration config;
-    AircraftVariant aircraftVariant = VariantUnknown;
     bool pluginInitialized = false;
-    bool shouldCaptureClickEvents = false;
-    bool hasPower = false;
     bool browserVisible = false;
-    Statusbar *statusbar;
     Browser *browser;
     CursorType activeCursor;
     
@@ -94,6 +77,9 @@ public:
     
     void update();
     void draw();
+    bool syncWindowGeometry(bool resizeBrowser = true);
+    bool normalizeWindowPoint(int x, int y, float *normalizedX, float *normalizedY);
+    void applyWindowMode();
     
     bool updateButtons(float normalizedX, float normalizedY, ButtonState state);
     void registerButton(Button *button);

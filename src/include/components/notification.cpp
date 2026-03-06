@@ -1,16 +1,18 @@
 #include "notification.h"
-#include "drawing.h"
+
+#include <cmath>
+#include <fstream>
+
 #include <XPLMGraphics.h>
 #include <XPLMUtilities.h>
 #if XPLANE_VERSION == 12
 #include <XPLMSound.h>
 #endif
-#include "dataref.h"
-#include <fstream>
-#include <cmath>
-#include "config.h"
-#include "path.h"
+
 #include "appstate.h"
+#include "config.h"
+#include "drawing.h"
+#include "path.h"
 
 Notification::Notification(std::string aTitle, std::string body) {
     dismissButton = nullptr;
@@ -19,22 +21,22 @@ Notification::Notification(std::string aTitle, std::string body) {
     width = 0.0f;
     height = 0.0f;
     animateIn = 0.0f;
-    
+
     title = aTitle;
     dismissButton = new Button(0.3f, 0.05f);
     dismissButton->setClickHandler([]() {
         AppState::getInstance()->showNotification(nullptr);
         return true;
     });
-    
+
     x = 0.5f;
     y = 0.55f;
-    
+
     width = 0.3f;
     x -= width / 2.0f;
-    bodyLines = Drawing::WrapWordsToLines(xplmFont_Proportional, body, width - ((horizontalTextPadding * 2.0f) / AppState::getInstance()->tabletDimensions.height));
-    height = (topPadding + titleBodyPadding + (bodyLines.size() * bodyLineHeight) + buttonPadding + dismissButton->pixelsHeight + buttonPadding) / AppState::getInstance()->tabletDimensions.height;
-    
+    bodyLines = Drawing::WrapWordsToLines(xplmFont_Proportional, body, width - ((horizontalTextPadding * 2.0f) / AppState::getInstance()->viewport.width));
+    height = (topPadding + titleBodyPadding + (bodyLines.size() * bodyLineHeight) + buttonPadding + dismissButton->displayHeight() + buttonPadding) / AppState::getInstance()->viewport.height;
+
 #if XPLANE_VERSION == 12
     std::ifstream file(Path::getInstance()->pluginDirectory + "/assets/notify.pcm", std::ios::binary | std::ios::ate);
     if (file) {
@@ -58,43 +60,41 @@ void Notification::destroy() {
 }
 
 void Notification::update() {
-    
 }
 
 void Notification::draw() {
     if (animateIn < 1.0f) {
         animateIn = fmin(animateIn + 0.1f, 1.0f);
     }
-    
+
     XPLMSetGraphicsState(
-                         0, // No fog, equivalent to glDisable(GL_FOG);
-                         0, // One texture, equivalent to glEnable(GL_TEXTURE_2D);
-                         0, // No lighting, equivalent to glDisable(GL_LIGHT0);
-                         0, // No alpha testing, e.g glDisable(GL_ALPHA_TEST);
-                         1, // Use alpha blending, e.g. glEnable(GL_BLEND);
-                         0, // No depth read, e.g. glDisable(GL_DEPTH_TEST);
-                         0 // No depth write, e.g. glDepthMask(GL_FALSE);
-    );
-    
+                         0,
+                         0,
+                         0,
+                         0,
+                         1,
+                         0,
+                         0);
+
     glColor4f(0.0f, 0.0f, 0.0f, animateIn * 0.6f);
     Drawing::DrawRect(0.0f, 0.0f, 1.0f, 1.0f);
-    
+
     set_brightness(AppState::getInstance()->brightness);
     Drawing::DrawRoundedRect(x, y - (height / 2.0f), x + width, y + (height / 2.0f), 16.0f);
-    
-    float yOffset = y + (height / 2.0f) - (topPadding  / AppState::getInstance()->tabletDimensions.height);
+
+    float yOffset = y + (height / 2.0f) - (topPadding / AppState::getInstance()->viewport.height);
     Drawing::DrawText(title, x + (width / 2.0f), yOffset, 1.4f);
-    
-    yOffset -= titleBodyPadding / AppState::getInstance()->tabletDimensions.height;
-    for (int i = 0; i < bodyLines.size(); ++i) {
-        Drawing::DrawText(bodyLines[i], x + (width / 2.0f), yOffset);
-        yOffset -= bodyLineHeight / AppState::getInstance()->tabletDimensions.height;
+
+    yOffset -= titleBodyPadding / AppState::getInstance()->viewport.height;
+    for (const auto& bodyLine : bodyLines) {
+        Drawing::DrawText(bodyLine, x + (width / 2.0f), yOffset);
+        yOffset -= bodyLineHeight / AppState::getInstance()->viewport.height;
     }
-    
+
     set_brightness(AppState::getInstance()->brightness * 0.2f);
     Drawing::DrawLine(x, yOffset, x + width, yOffset, 1.0f);
-    yOffset -= (buttonPadding / AppState::getInstance()->tabletDimensions.height) * 3.0f;
-    
+    yOffset -= (buttonPadding / AppState::getInstance()->viewport.height) * 3.0f;
+
     dismissButton->setPosition(0.5f, yOffset);
     Drawing::DrawText("OK", x + (width / 2.0f), yOffset, 1.4f, { AppState::getInstance()->brightness * 0.4f, AppState::getInstance()->brightness * 0.4f, AppState::getInstance()->brightness * 1.0f });
 }

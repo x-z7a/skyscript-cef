@@ -43,6 +43,7 @@ class BrowserHandler : public CefClient,
         CefRefPtr<CefBrowser> browserInstance;
 
         void destroy();
+        void setViewSize(unsigned short width, unsigned short height);
 
         CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
             return this;
