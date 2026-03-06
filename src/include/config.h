@@ -1,6 +1,12 @@
 #if defined(_WIN32) || defined(_WIN64)
-#include <GL/gl.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
+#include <GL/gl.h>
 #define GL_BGRA GL_BGRA_EXT
 #define GL_CLAMP_TO_EDGE 0x812F
 #elif __linux__
